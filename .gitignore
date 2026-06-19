@@ -1,0 +1,15 @@
+# Engagement output
+*-results/
+results/
+screenshots/
+*.sqlite3
+gowitness.db
+
+# Tool artifacts
+*.log
+
+# OS / editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/

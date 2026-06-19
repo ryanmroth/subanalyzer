@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+#
+# subanalyzer - passive recon pipeline
+#   subfinder  -> subdomain enumeration
+#   httpx      -> liveness probing
+#   httpx      -> exposed /.git/HEAD detection (content-validated)
+#   gowitness  -> screenshots of live hosts
+#
+# Usage:   subanalyzer.sh <domain> [output-dir]
+# Example: subanalyzer.sh example.com
+#
+# Requires: subfinder, httpx (ProjectDiscovery), gowitness v3 (sensepost)
+#
+# Author: Ryan Roth
+# License: MIT
+#
+set -euo pipefail
+
+# --- configuration (override via environment) --------------------------------
+HTTPX_THREADS="${HTTPX_THREADS:-50}"
+HTTPX_TIMEOUT="${HTTPX_TIMEOUT:-10}"
+GIT_THREADS="${GIT_THREADS:-30}"
+GIT_TIMEOUT="${GIT_TIMEOUT:-5}"
+SHOT_X="${SHOT_X:-1280}"
+SHOT_Y="${SHOT_Y:-720}"
+
+# --- output helpers ----------------------------------------------------------
+log() { printf '[+] %s\n' "$*"; }
+err() { printf '[-] %s\n' "$*" >&2; }
+die() { err "$*"; exit 1; }
+
+# Zero-safe line count: clean integer, or 0 if the file is missing/empty.
+count_lines() { [[ -s "$1" ]] && wc -l < "$1" | tr -d '[:space:]' || echo 0; }
+
+usage() {
+  cat <<'EOF'
+Usage: subanalyzer.sh <domain> [output-dir]
+
+Passive subdomain enumeration, liveness probing, exposed-.git detection,
+and screenshot capture.
+
+Arguments:
+  domain       Target apex domain (e.g. example.com)
+  output-dir   Optional; defaults to <domain>-results
+
+Environment overrides (defaults):
+  HTTPX_THREADS (50)   HTTPX_TIMEOUT (10)
+  GIT_THREADS   (30)   GIT_TIMEOUT   (5)
+  SHOT_X        (1280) SHOT_Y        (720)
+EOF
+}
+
+# --- preflight ---------------------------------------------------------------
+# Collect ALL missing tools and report them together with an install hint,
+# rather than failing on the first one.
+require_tools() {
+  declare -A hint=(
+    [subfinder]="go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
+    [httpx]="go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest"
+    [gowitness]="go install github.com/sensepost/gowitness@latest  (or AUR / release binary)"
+  )
+  local missing=() t
+  for t in subfinder httpx gowitness awk sed; do
+    command -v "$t" >/dev/null 2>&1 || missing+=("$t")
+  done
+  if (( ${#missing[@]} )); then
+    err "Missing required tool(s):"
+    for t in "${missing[@]}"; do
+      printf '      %-10s %s\n' "$t" "${hint[$t]:-(install via your package manager)}" >&2
+    done
+    exit 1
+  fi
+
+  # 'httpx' is an ambiguous binary name: the Python HTTP client also ships an
+  # 'httpx' CLI. Sanity-check that this is ProjectDiscovery httpx, not that one.
+  if ! httpx -version 2>&1 | grep -qi 'projectdiscovery\|httpx version'; then
+    die "'httpx' on PATH does not look like ProjectDiscovery httpx (Python httpx collision?)."
+  fi
+}
+
+# --- main --------------------------------------------------------------------
+main() {
+  case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    "")        usage; exit 1 ;;
+  esac
+
+  require_tools
+
+  local domain="$1"
+  local results_dir="${2:-${domain}-results}"
+
+  trap 'printf "\n"; err "Interrupted"; exit 130' INT
+
+  log "Creating results directory: $results_dir"
+  mkdir -p "$results_dir" || die "Failed to create directory: $results_dir"
+
+  log "Running subfinder for $domain ..."
+  subfinder -d "$domain" -silent -o "$results_dir/subdomains.txt" || die "subfinder failed"
+  log "Found $(count_lines "$results_dir/subdomains.txt") subdomains"
+
+  log "Probing liveness with httpx ..."
+  httpx -l "$results_dir/subdomains.txt" \
+        -threads "$HTTPX_THREADS" \
+        -timeout "$HTTPX_TIMEOUT" \
+        -status-code \
+        -title \
+        -silent \
+        -o "$results_dir/alive_subdomains.txt" || die "httpx failed"
+
+  local alive_count
+  alive_count=$(count_lines "$results_dir/alive_subdomains.txt")
+  log "Found $alive_count alive subdomains"
+  (( alive_count > 0 )) || { log "No alive hosts; nothing further to do."; exit 0; }
+
+  log "Extracting clean URLs ..."
+  awk '{print $1}' "$results_dir/alive_subdomains.txt" > "$results_dir/clean_urls.txt"
+
+  # Probe /.git/HEAD and require a 200 whose body is a real git ref.
+  # /.git with -mc 200,403 was noisy: 403 does not mean the repo is exposed.
+  log "Checking for exposed .git (probing /.git/HEAD) ..."
+  sed 's|$|/.git/HEAD|' "$results_dir/clean_urls.txt" > "$results_dir/git_urls.txt"
+  httpx -l "$results_dir/git_urls.txt" \
+        -threads "$GIT_THREADS" \
+        -timeout "$GIT_TIMEOUT" \
+        -status-code \
+        -mc 200 \
+        -mr 'ref: refs/heads/' \
+        -silent \
+        -o "$results_dir/git_found.txt" || die "git check failed"
+  log "Found $(count_lines "$results_dir/git_found.txt") exposed .git repos"
+
+  log "Capturing screenshots with gowitness ..."
+  gowitness scan file \
+           -f "$results_dir/clean_urls.txt" \
+           --screenshot-format png \
+           --chrome-window-x "$SHOT_X" \
+           --chrome-window-y "$SHOT_Y" \
+           -s "$results_dir/screenshots/" \
+           -q || die "gowitness failed"
+
+  trap - INT
+  log "Analysis complete. Results in $results_dir/"
+  printf '    - Subdomains:   %s/subdomains.txt\n'        "$results_dir"
+  printf '    - Alive hosts:  %s/alive_subdomains.txt\n'  "$results_dir"
+  printf '    - Exposed .git: %s/git_found.txt\n'         "$results_dir"
+  printf '    - Screenshots:  %s/screenshots/\n'          "$results_dir"
+}
+
+main "$@"
