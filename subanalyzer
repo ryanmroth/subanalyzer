@@ -4,12 +4,13 @@
 #   subfinder  -> subdomain enumeration
 #   httpx      -> liveness probing
 #   httpx      -> exposed /.git/HEAD detection (content-validated)
-#   gowitness  -> screenshots of live hosts
+#   gowitness  -> screenshots of live hosts (needs a Chrome/Chromium browser)
 #
 # Usage:   subanalyzer.sh <domain> [output-dir]
 # Example: subanalyzer.sh example.com
 #
-# Requires: subfinder, httpx (ProjectDiscovery), gowitness v3 (sensepost)
+# Requires: subfinder, httpx (ProjectDiscovery), gowitness v3 (sensepost),
+#           and a Chrome/Chromium browser for the screenshot stage.
 # Runs on bash 3.2+ (no bash 4 features), so the stock macOS bash works.
 #
 # Author: Ryan Roth
@@ -24,6 +25,7 @@ GIT_THREADS="${GIT_THREADS:-30}"
 GIT_TIMEOUT="${GIT_TIMEOUT:-5}"
 SHOT_X="${SHOT_X:-1280}"
 SHOT_Y="${SHOT_Y:-720}"
+CHROME_PATH="${CHROME_PATH:-}"   # full path to a Chrome/Chromium binary; auto-detected if empty
 
 # --- output helpers ----------------------------------------------------------
 log() { printf '[+] %s\n' "$*"; }
@@ -48,6 +50,7 @@ Environment overrides (defaults):
   HTTPX_THREADS (50)   HTTPX_TIMEOUT (10)
   GIT_THREADS   (30)   GIT_TIMEOUT   (5)
   SHOT_X        (1280) SHOT_Y        (720)
+  CHROME_PATH   (auto-detected: google-chrome / chromium / ...)
 EOF
 }
 
@@ -63,8 +66,7 @@ install_hint() {
   esac
 }
 
-# Collect ALL missing tools and report them together, rather than failing on
-# the first one.
+# Hard dependencies. Collect ALL missing tools and report them together.
 require_tools() {
   local missing=() t
   for t in subfinder httpx gowitness awk sed; do
@@ -85,6 +87,24 @@ require_tools() {
   fi
 }
 
+# gowitness drives a real Chrome/Chromium; it does not bundle one. Resolve a
+# browser binary into CHROME_PATH. This is a soft dependency: if none is found
+# the screenshot stage is skipped rather than failing the whole run.
+resolve_chrome() {
+  if [[ -n "$CHROME_PATH" ]]; then
+    [[ -x "$CHROME_PATH" ]] || die "CHROME_PATH is set but not an executable: $CHROME_PATH"
+    return 0
+  fi
+  local b
+  for b in google-chrome google-chrome-stable chromium chromium-browser chrome; do
+    if command -v "$b" >/dev/null 2>&1; then
+      CHROME_PATH="$(command -v "$b")"
+      return 0
+    fi
+  done
+  return 0   # leave empty; caller warns and skips screenshots
+}
+
 # --- main --------------------------------------------------------------------
 main() {
   case "${1:-}" in
@@ -93,6 +113,7 @@ main() {
   esac
 
   require_tools
+  resolve_chrome
 
   local domain="$1"
   local results_dir="${2:-${domain}-results}"
@@ -137,21 +158,30 @@ main() {
         -o "$results_dir/git_found.txt" || die "git check failed"
   log "Found $(count_lines "$results_dir/git_found.txt") exposed .git repos"
 
-  log "Capturing screenshots with gowitness ..."
-  gowitness scan file \
-           -f "$results_dir/clean_urls.txt" \
-           --screenshot-format png \
-           --chrome-window-x "$SHOT_X" \
-           --chrome-window-y "$SHOT_Y" \
-           -s "$results_dir/screenshots/" \
-           -q || die "gowitness failed"
+  local shots_line
+  if [[ -n "$CHROME_PATH" ]]; then
+    log "Capturing screenshots with gowitness (chrome: $CHROME_PATH) ..."
+    gowitness scan file \
+             -f "$results_dir/clean_urls.txt" \
+             --chrome-path "$CHROME_PATH" \
+             --screenshot-format png \
+             --chrome-window-x "$SHOT_X" \
+             --chrome-window-y "$SHOT_Y" \
+             -s "$results_dir/screenshots/" \
+             -q || die "gowitness failed"
+    shots_line="    - Screenshots:  $results_dir/screenshots/"
+  else
+    err "No Chrome/Chromium found; skipping screenshots."
+    err "Install a browser (Arch: sudo pacman -S chromium) or set CHROME_PATH, then re-run."
+    shots_line="    - Screenshots:  (skipped: no browser found)"
+  fi
 
   trap - INT
   log "Analysis complete. Results in $results_dir/"
   printf '    - Subdomains:   %s/subdomains.txt\n'        "$results_dir"
   printf '    - Alive hosts:  %s/alive_subdomains.txt\n'  "$results_dir"
   printf '    - Exposed .git: %s/git_found.txt\n'         "$results_dir"
-  printf '    - Screenshots:  %s/screenshots/\n'          "$results_dir"
+  printf '%s\n' "$shots_line"
 }
 
 main "$@"

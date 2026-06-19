@@ -28,6 +28,14 @@ for exposed `.git` repositories, and captures screenshots of live hosts.
 
   Make sure `$(go env GOPATH)/bin` is on your `PATH`.
 
+- A Chrome or Chromium browser for the screenshot stage. gowitness drives a
+  real headless browser and does not bundle one. On Arch: `sudo pacman -S
+  chromium`; on Debian/Ubuntu: `sudo apt install chromium` (or install Google
+  Chrome). gowitness looks for a `google-chrome` binary by default, so when you
+  have Chromium instead, the script auto-detects it and passes `--chrome-path`.
+  Set `CHROME_PATH` to a full binary path to override detection. If no browser
+  is found the script skips screenshots and still produces the other output.
+
 > Note: `httpx` is also the name of a Python HTTP client that installs its own
 > `httpx` CLI. The script verifies the `httpx` on your `PATH` is the
 > ProjectDiscovery tool and aborts if it is not.
@@ -71,6 +79,7 @@ If no output directory is given, results are written to `<domain>-results/`.
 | `GIT_TIMEOUT`   | 5       | httpx timeout for the .git check |
 | `SHOT_X`        | 1280    | screenshot width in pixels       |
 | `SHOT_Y`        | 720     | screenshot height in pixels      |
+| `CHROME_PATH`   | auto    | full path to a Chrome/Chromium binary |
 
 ```bash
 HTTPX_THREADS=100 SHOT_X=1920 SHOT_Y=1080 ./subanalyzer.sh example.com
@@ -94,6 +103,11 @@ HTTPX_THREADS=100 SHOT_X=1920 SHOT_Y=1080 ./subanalyzer.sh example.com
   match on `200` alone and triage manually.
 - subfinder's passive sources are far more effective with API keys configured.
   See the subfinder documentation for the provider config file.
+- On a headless server, Chromium needs fonts to render legible screenshots; a
+  bare install can produce blank or boxed text. Install a font package (Arch:
+  `sudo pacman -S noto-fonts`) if screenshots look empty. If you run as root and
+  Chromium refuses to start over a sandbox error, run as a non-root user or
+  check `gowitness scan file -h` for the relevant Chrome flags.
 
 ## Legal
 
