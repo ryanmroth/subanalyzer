@@ -10,6 +10,7 @@
 # Example: subanalyzer.sh example.com
 #
 # Requires: subfinder, httpx (ProjectDiscovery), gowitness v3 (sensepost)
+# Runs on bash 3.2+ (no bash 4 features), so the stock macOS bash works.
 #
 # Author: Ryan Roth
 # License: MIT
@@ -51,14 +52,20 @@ EOF
 }
 
 # --- preflight ---------------------------------------------------------------
-# Collect ALL missing tools and report them together with an install hint,
-# rather than failing on the first one.
+# Install hint per tool. A case statement keeps this bash 3.2 compatible
+# (associative arrays would require bash 4).
+install_hint() {
+  case "$1" in
+    subfinder) echo "go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest" ;;
+    httpx)     echo "go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest" ;;
+    gowitness) echo "go install github.com/sensepost/gowitness@latest" ;;
+    *)         echo "(install via your package manager)" ;;
+  esac
+}
+
+# Collect ALL missing tools and report them together, rather than failing on
+# the first one.
 require_tools() {
-  declare -A hint=(
-    [subfinder]="go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
-    [httpx]="go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest"
-    [gowitness]="go install github.com/sensepost/gowitness@latest  (or AUR / release binary)"
-  )
   local missing=() t
   for t in subfinder httpx gowitness awk sed; do
     command -v "$t" >/dev/null 2>&1 || missing+=("$t")
@@ -66,7 +73,7 @@ require_tools() {
   if (( ${#missing[@]} )); then
     err "Missing required tool(s):"
     for t in "${missing[@]}"; do
-      printf '      %-10s %s\n' "$t" "${hint[$t]:-(install via your package manager)}" >&2
+      printf '      %-10s %s\n' "$t" "$(install_hint "$t")" >&2
     done
     exit 1
   fi

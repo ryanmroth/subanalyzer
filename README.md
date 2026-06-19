@@ -15,9 +15,8 @@ for exposed `.git` repositories, and captures screenshots of live hosts.
 
 ## Requirements
 
-- `bash` 4.0 or newer. The preflight uses an associative array (`declare -A`),
-  which bash 3.2 does not support. macOS ships bash 3.2, so on a Mac install a
-  newer bash (`brew install bash`) or run the script on Linux.
+- `bash`. The script avoids bash 4 features, so the stock macOS bash (3.2) works
+  as well as newer versions on Linux.
 - Go 1.24 or newer if installing the tools from source.
 - The three tools on your `PATH`:
 
