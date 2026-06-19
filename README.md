@@ -36,9 +36,9 @@ for exposed `.git` repositories, and captures screenshots of live hosts.
   Set `CHROME_PATH` to a full binary path to override detection. If no browser
   is found the script skips screenshots and still produces the other output.
 
-> Note: `httpx` is also the name of a Python HTTP client that installs its own
-> `httpx` CLI. The script verifies the `httpx` on your `PATH` is the
-> ProjectDiscovery tool and aborts if it is not.
+> Note: `httpx` is an ambiguous binary name. The Python HTTP client installs
+> its own `httpx` CLI, which is not compatible. Make sure the ProjectDiscovery
+> `httpx` is the one on your `PATH`.
 
 ## Installation
 

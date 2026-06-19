@@ -79,14 +79,6 @@ require_tools() {
     done
     exit 1
   fi
-
-  # 'httpx' is an ambiguous binary name: the Python HTTP client also ships an
-  # 'httpx' CLI. Disambiguate by checking for -status-code, a flag unique to
-  # ProjectDiscovery httpx that this script relies on. This doubles as a
-  # capability check and avoids matching version-banner text (which varies).
-  if ! httpx -h 2>&1 | grep -q -- '-status-code'; then
-    die "'httpx' on PATH does not support -status-code; looks like the Python httpx CLI, not ProjectDiscovery's."
-  fi
 }
 
 # gowitness drives a real Chrome/Chromium; it does not bundle one. Resolve a
